@@ -55,6 +55,24 @@ open class DefaultArgumentStubGenerator constructor(val context: CommonBackendCo
 
     private val symbols = context.ir.symbols
 
+    private fun buildOverriddenSymbols(newIrFunction: IrSimpleFunction, irFunction: IrSimpleFunction) {
+        for (baseFunSymbol in irFunction.overriddenSymbols) {
+            val baseFun = baseFunSymbol.owner
+            if (baseFun.needsDefaultArgumentsLowering(skipInlineMethods)) {
+                val baseOrigin = if (baseFun.valueParameters.any { it.defaultValue != null }) {
+                    DECLARATION_ORIGIN_FUNCTION_FOR_DEFAULT_PARAMETER
+                } else {
+                    IrDeclarationOrigin.FAKE_OVERRIDE
+                }
+                (baseFun.generateDefaultsFunction(context, baseOrigin) as? IrSimpleFunction)?.let {
+                    newIrFunction.overriddenSymbols.add(it.symbol)
+                    if (it.overriddenSymbols.isEmpty() && baseOrigin == IrDeclarationOrigin.FAKE_OVERRIDE)
+                        buildOverriddenSymbols(it, baseFun)
+                }
+            }
+        }
+    }
+
     private fun lower(irFunction: IrFunction): List<IrFunction> {
         if (!irFunction.needsDefaultArgumentsLowering(skipInlineMethods))
             return listOf(irFunction)
@@ -69,19 +87,7 @@ open class DefaultArgumentStubGenerator constructor(val context: CommonBackendCo
             val newIrFunction = irFunction.generateDefaultsFunction(context, IrDeclarationOrigin.FAKE_OVERRIDE)
 
             if (irFunction is IrSimpleFunction) {
-                for (baseFunSymbol in irFunction.overriddenSymbols) {
-                    val baseFun = baseFunSymbol.owner
-                    if (baseFun.needsDefaultArgumentsLowering(skipInlineMethods)) {
-                        val baseOrigin = if (baseFun.valueParameters.any { it.defaultValue != null }) {
-                            DECLARATION_ORIGIN_FUNCTION_FOR_DEFAULT_PARAMETER
-                        } else {
-                            IrDeclarationOrigin.FAKE_OVERRIDE
-                        }
-                        (baseFun.generateDefaultsFunction(context, baseOrigin) as? IrSimpleFunction)?.let {
-                            (newIrFunction as IrSimpleFunction).overriddenSymbols.add(it.symbol)
-                        }
-                    }
-                }
+                buildOverriddenSymbols(newIrFunction as IrSimpleFunction, irFunction)
             }
 
             return listOf(irFunction, newIrFunction)
